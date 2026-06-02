@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Smart Clock & Weather</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            width: 100vw;
+            margin: 0;
+            overflow-x: hidden;
+            background-color: #ffffff;
+            color: #000000;
+        }
+        .app-container {
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            box-sizing: border-box;
+        }
+        @media (max-width: 500px) {
+            #time-display { font-size: 14vw !important; }
+            #date-display { font-size: 9vw !important; }
+        }
+        .custom-scrollbar::-webkit-scrollbar { height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div id="date-display" class="font-medium tracking-wide whitespace-nowrap" style="font-size: 4.5rem; line-height: 1.1;">
+            YYYY/MM/DD (요일)
+        </div>
+
+        <div class="flex items-center gap-4 sm:gap-6 mt-4">
+            <div class="flex flex-col text-xl tracking-widest text-center">
+                <span id="am-label" class="text-gray-400 font-normal">AM</span>
+                <span id="pm-label" class="text-gray-400 font-normal">PM</span>
+            </div>
+            <div id="time-display" class="font-normal tracking-wider whitespace-nowrap" style="font-size: 9rem; line-height: 1;">
+                00:00<span style="font-size: 70%;">:00</span>
+            </div>
+        </div>
+
+        <div class="mt-8 flex flex-col gap-5 w-full">
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="text-[27px]">
+                    <span>날씨 :</span>
+                    <span id="weather-display" class="bg-yellow-300 px-3 py-1 font-medium ml-1">위치 확인 중...</span>
+                </div>
+                
+                <div id="location-radio-container" class="ml-0 sm:ml-2 mt-2 sm:mt-0 flex items-center gap-4 text-xl bg-gray-100 px-5 py-2 rounded-full border border-gray-200 overflow-x-auto whitespace-nowrap custom-scrollbar">
+                    <span class="text-lg text-gray-500 animate-pulse">시트 데이터 불러오는 중...</span>
+                </div>
+            </div>
+            
+            <div id="weekly-forecast" class="mt-2 grid grid-cols-7 gap-1 sm:gap-2 w-full">
+                <div class="col-span-7 text-center text-sm font-semibold text-blue-500 py-6">날씨 데이터를 불러오고 있습니다...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="hourly-modal" class="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center hidden transition-opacity">
+        <div class="bg-white rounded-xl shadow-2xl w-11/12 max-w-2xl overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b border-gray-200 bg-gray-50">
+                <h3 id="modal-title" class="text-lg font-bold text-gray-800">시간별 날씨</h3>
+                <button id="close-modal" class="text-gray-400 hover:text-red-500 text-3xl font-bold leading-none">&times;</button>
+            </div>
+            <div class="p-4 bg-white">
+                <div id="hourly-container" class="flex gap-3 overflow-x-auto pb-4 custom-scrollbar">
+                    </div>
+            </div>
+            <div class="px-4 py-3 border-t border-gray-100 text-xs text-gray-500 text-right bg-gray-50">
+                파란색 글씨는 강수확률(%) 입니다.
+            </div>
+        </div>
+    </div>
+
+    <script>
+    window.addEventListener('error', function(e) {
+        var w = document.getElementById('weather-display');
+        if(w) w.innerText = "스크립트 에러: " + e.message;
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        var w = document.getElementById('weather-display');
+        if(w) w.innerText = "통신 거부 에러: " + (e.reason ? e.reason.message : "알수없음");
+    });
+
+    // 1. 시계 엔진 (1초 단위 갱신)
+    function updateClock() {
+        try {
+            var now = new Date();
+            var year = now.getFullYear();
+            var month = String(now.getMonth() + 1).padStart(2, '0');
+            var date = String(now.getDate()).padStart(2, '0');
+            var days = ['일', '월', '화', '수', '목', '금', '토'];
+            var dayName = days[now.getDay()];
+            
+            var dateDisplay = document.getElementById('date-display');
+            if(dateDisplay) dateDisplay.innerText = year + '/' + month + '/' + date + ' (' + dayName + ')';
+
+            var hours = now.getHours();
+            var minutes = String(now.getMinutes()).padStart(2, '0');
+            var seconds = String(now.getSeconds()).padStart(2, '0');
+            var isPM = hours >= 12;
+
+            var amLabel = document.getElementById('am-label');
+            var pmLabel = document.getElementById('pm-label');
+            
+            if (amLabel && pmLabel) {
+                if (isPM) {
+                    amLabel.className = 'text-gray-400 font-normal';
+                    pmLabel.className = 'text-black font-bold';
+                } else {
+                    amLabel.className = 'text-black font-bold';
+                    pmLabel.className = 'text-gray-400 font-normal';
+                }
+            }
+
+            hours = hours % 12;
+            hours = hours ? hours : 12; 
+            var formattedHours = String(hours).padStart(2, '0');
+            
+            var timeDisplay = document.getElementById('time-display');
+            // 초시간 부분을 시/분 크기의 70%로 축소 적용
+            if(timeDisplay) timeDisplay.innerHTML = formattedHours + ':' + minutes + '<span style="font-size: 70%;">:' + seconds + '</span>';
+        } catch(e) { console.error(e); }
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // 2. 날씨 통신 엔진 세팅
+    var globalWeatherData = null;
+    var weatherAppInitialized = false;
+
+    var weatherCodes = {
+        0: '맑음', 1: '대체로 맑음', 2: '구름 조금', 3: '흐림',
+        45: '안개', 48: '짙은 안개', 51: '가벼운 이슬비', 53: '이슬비', 55: '강한 이슬비',
+        61: '가벼운 비', 63: '비', 65: '강한 비', 71: '가벼운 눈', 73: '눈', 75: '강한 눈',
+        80: '가벼운 소나기', 81: '소나기', 82: '강한 소나기', 95: '뇌우', 96: '뇌우 및 우박'
+    };
+
+    function getWeatherIcon(code) {
+        var icon = '☀️';
+        if ([1, 2].includes(code)) icon = '⛅';
+        else if ([3].includes(code)) icon = '☁️';
+        else if ([45, 48].includes(code)) icon = '🌫️';
+        else if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) icon = '🌧️';
+        else if ([71, 73, 75].includes(code)) icon = '❄️';
+        else if ([95, 96].includes(code)) icon = '⛈️';
+        return icon;
+    }
+
+    // 주소 또는 좌표를 판단하여 무조건 위도,경도로 반환하는 헬퍼 함수
+    function getCoordinates(addressOrCoord) {
+        return new Promise(function(resolve, reject) {
+            // 이미 콤마와 숫자로 이루어진 좌표인 경우 (예: "36.1195, 128.3445" 또는 마이너스 좌표)
+            if (/-?[0-9.]+\s*,\s*-?[0-9.]+/.test(addressOrCoord)) {
+                var parts = addressOrCoord.split(',');
+                resolve({ lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) });
+            } else {
+                // 한글 텍스트 주소일 경우 Open-Meteo 무료 지오코딩 API 활용
+                fetch('https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(addressOrCoord) + '&count=1&language=ko&format=json')
+                    .then(function(res) {
+                        if (!res.ok) throw new Error("지오코딩 서버 오류");
+                        return res.json();
+                    })
+                    .then(function(data) {
+                        if (data.results && data.results.length > 0) {
+                            resolve({ lat: data.results[0].latitude, lon: data.results[0].longitude });
+                        } else {
+                            // [스마트 복구] 전체 주소를 못 찾으면 '산동읍/구' 등 세부 주소를 버리고 '시/군/도' 단위로 재검색
+                            var tokens = addressOrCoord.split(' ');
+                            var cityToken = '';
+                            
+                            for (var i = 0; i < tokens.length; i++) {
+                                if (tokens[i].endsWith('시') || tokens[i].endsWith('군') || tokens[i].endsWith('도')) {
+                                    cityToken = tokens[i];
+                                }
+                            }
+
+                            if (cityToken !== '') {
+                                fetch('https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(cityToken) + '&count=1&language=ko&format=json')
+                                    .then(function(fbRes) { return fbRes.json(); })
+                                    .then(function(fbData) {
+                                        if (fbData.results && fbData.results.length > 0) {
+                                            resolve({ lat: fbData.results[0].latitude, lon: fbData.results[0].longitude });
+                                        } else {
+                                            reject(new Error("해당 지역명('" + addressOrCoord + "')을 찾을 수 없습니다.<br><br>💡 구글 시트에 <b>위도, 경도 숫자 (예: 35.2125, 129.0208)</b>를 입력해주세요."));
+                                        }
+                                    })
+                                    .catch(function(err) { reject(err); });
+                            } else {
+                                reject(new Error("해당 지역명('" + addressOrCoord + "')을 찾을 수 없습니다.<br><br>💡 구글 시트에 <b>위도, 경도 숫자 (예: 35.2125, 129.0208)</b>를 입력해주세요."));
+                            }
+                        }
+                    })
+                    .catch(function(err) {
+                        reject(err);
+                    });
+            }
+        });
+    }
+
+    // 실제 날씨를 가져와서 UI를 그리는 함수
+    function fetchWeather() {
+        var weatherDisplay = document.getElementById('weather-display');
+        var forecastContainer = document.getElementById('weekly-forecast');
+        
+        if (!weatherDisplay) return;
+
+        var radioChecked = document.querySelector('input[name="location"]:checked');
+        if (!radioChecked) return;
+
+        var addressOrCoord = radioChecked.value;
+        var city = radioChecked.nextSibling.textContent.trim();
+
+        weatherDisplay.innerText = city + " 날씨 가져오는 중...";
+        if (forecastContainer) {
+            forecastContainer.innerHTML = '<div class="col-span-7 text-center text-sm font-semibold text-blue-500 py-6">안전 모드로 데이터를 연결 중입니다...</div>';
+        }
+
+        // 주소->좌표 변환 후 날씨 API 호출 (안전한 체이닝)
+        getCoordinates(addressOrCoord)
+            .then(function(coords) {
+                var lat = coords.lat;
+                var lon = coords.lon;
+                var apiUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FSeoul';
+                return fetch(apiUrl);
+            })
+            .then(function(response) {
+                if (!response.ok) throw new Error("서버 응답 거부: " + response.status);
+                return response.json();
+            })
+            .then(function(weatherData) {
+                globalWeatherData = weatherData;
+                var code = weatherData.current_weather.weathercode;
+                var temp = weatherData.current_weather.temperature;
+                var weatherText = weatherCodes[code] || '알 수 없음';
+                weatherDisplay.innerText = city + ' ' + weatherText + ' (' + temp + '°C)';
+
+                if (forecastContainer) {
+                    forecastContainer.innerHTML = ''; 
+                    var daily = weatherData.daily;
+                    var dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+
+                    for (var j = 0; j < 7; j++) {
+                        var dateObj = new Date(daily.time[j]);
+                        var dayOfWeek = dayNames[dateObj.getDay()];
+                        var dailyCode = daily.weathercode[j];
+                        var maxTemp = Math.round(daily.temperature_2m_max[j]);
+                        var minTemp = Math.round(daily.temperature_2m_min[j]);
+                        var icon = getWeatherIcon(dailyCode);
+
+                        var dayDiv = document.createElement('div');
+                        dayDiv.className = 'flex flex-col items-center justify-center p-1 sm:p-2 bg-gray-50 rounded shadow-sm border border-gray-200 cursor-pointer hover:bg-blue-50 transition transform hover:-translate-y-1';
+                        dayDiv.innerHTML = 
+                            '<span class="text-xs font-bold text-gray-700">' + dayOfWeek + '</span>' +
+                            '<span class="text-xl sm:text-2xl my-1">' + icon + '</span>' +
+                            '<span class="text-xs text-red-500 font-medium">' + maxTemp + '°</span>' +
+                            '<span class="text-xs text-blue-500 font-medium">' + minTemp + '°</span>';
+                        
+                        // 클릭 이벤트 할당 시 클로저 보호를 위해 속성 부여
+                        dayDiv.setAttribute('data-index', j);
+                        dayDiv.setAttribute('data-day', dayOfWeek);
+                        dayDiv.setAttribute('data-date', daily.time[j]);
+                        
+                        dayDiv.onclick = function() {
+                            showHourlyWeather(this.getAttribute('data-index'), this.getAttribute('data-day'), this.getAttribute('data-date'));
+                        };
+                        
+                        forecastContainer.appendChild(dayDiv);
+                    }
+                }
+            })
+            .catch(function(error) {
+                weatherDisplay.innerText = "날씨 통신 실패";
+                if (forecastContainer) {
+                    forecastContainer.innerHTML = 
+                        '<div class="col-span-7 flex flex-col items-center justify-center p-5 border border-red-300 bg-red-50 rounded-lg">' +
+                        '<span class="text-red-600 font-bold mb-2">날씨 정보 요청이 차단되었습니다.</span>' +
+                        '<span class="text-sm text-red-500 text-center leading-relaxed">' + error.message + '</span>' +
+                        '<button onclick="fetchWeather()" class="mt-4 px-4 py-2 bg-red-500 text-white text-xs rounded hover:bg-red-600 shadow">다시 시도하기</button>' +
+                        '</div>';
+                }
+            });
+    }
+
+    // 3. 시간별 날씨 팝업 로직
+    function showHourlyWeather(dayIndex, dayOfWeek, dateStr) {
+        var data = globalWeatherData;
+        if(!data || !data.hourly) return;
+
+        var startIndex = parseInt(dayIndex) * 24;
+        var endIndex = startIndex + 24;
+        
+        var dateObj = new Date(dateStr);
+        var month = dateObj.getMonth() + 1;
+        var date = dateObj.getDate();
+        document.getElementById('modal-title').innerText = month + '/' + date + ' (' + dayOfWeek + ') 시간별 날씨';
+
+        var container = document.getElementById('hourly-container');
+        container.innerHTML = '';
+
+        for(var i = startIndex; i < endIndex; i++) {
+            var timeStr = data.hourly.time[i];
+            var hourStr = timeStr.split('T')[1].split(':')[0]; 
+            var hour = parseInt(hourStr, 10);
+            
+            var temp = Math.round(data.hourly.temperature_2m[i]);
+            var code = data.hourly.weathercode[i];
+            var precipProb = data.hourly.precipitation_probability[i];
+            var icon = getWeatherIcon(code);
+
+            var item = document.createElement('div');
+            item.className = 'flex flex-col items-center justify-center min-w-[70px] p-3 bg-white border border-gray-100 rounded-lg shadow-sm shrink-0';
+            item.innerHTML = 
+                '<span class="text-sm font-medium text-gray-600">' + hour + '시</span>' +
+                '<span class="text-3xl my-2 drop-shadow-sm">' + icon + '</span>' +
+                '<span class="text-lg font-bold text-gray-800">' + temp + '°</span>' +
+                '<span class="text-xs font-semibold text-blue-500 mt-1 flex items-center">' +
+                '<svg class="w-3 h-3 mr-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 2a6 6 0 00-6 6c0 4.314 6 10 6 10s6-5.686 6-10a6 6 0 00-6-6zm0 2a4 4 0 110 8 4 4 0 010-8z" clip-rule="evenodd"></path></svg>' +
+                precipProb + '%</span>';
+            container.appendChild(item);
+        }
+        
+        document.getElementById('hourly-modal').classList.remove('hidden');
+    }
+
+    // 4. 앱 초기화 (시트에서 데이터 가져오기)
+    function initWeatherApp() {
+        if (weatherAppInitialized) return;
+        var weatherDisplay = document.getElementById('weather-display');
+        if (!weatherDisplay) {
+            setTimeout(initWeatherApp, 100);
+            return;
+        }
+        weatherAppInitialized = true;
+
+        // 모달 닫기 버튼 이벤트 등록
+        var closeModalBtn = document.getElementById('close-modal');
+        var hourlyModal = document.getElementById('hourly-modal');
+        if (closeModalBtn && hourlyModal) {
+            closeModalBtn.onclick = function() { hourlyModal.classList.add('hidden'); };
+            hourlyModal.onclick = function(e) { if(e.target.id === 'hourly-modal') hourlyModal.classList.add('hidden'); };
+        }
+
+        // 구글 Apps Script API 연동하여 시트에서 지역 4개 가져오기
+        var scriptUrl = 'https://script.google.com/macros/s/AKfycbxwVrnz_wcsdqaJ-XkDvSLjhcswtcUPp_Qa9q5xhCm__jCDJEUY3fmoVsSJDbonS9kC/exec'; // 💡 변경된 부분: API 주소 입력
+
+        fetch(scriptUrl)
+            .then(function(response) {
+                if (!response.ok) throw new Error("네트워크 응답이 정상이 아닙니다.");
+                return response.json();
+            })
+            .then(function(data) {
+                var container = document.getElementById('location-radio-container');
+                
+                if (data.error) {
+                    container.innerHTML = '<span class="text-sm text-red-500">시트 오류: ' + data.error + '</span>';
+                    weatherDisplay.innerText = "지역 연동 실패";
+                    return;
+                }
+                
+                container.innerHTML = ''; 
+                var hasItem = false;
+                
+                // 장비에 저장된 마지막 선택 지역 이름 꺼내기
+                var savedName = localStorage.getItem('lastSelectedLocationName');
+                var anyChecked = false;
+
+                for (var i = 0; i < 4; i++) {
+                    var name = data.names[i];
+                    var coord = data.coords[i]; 
+                    if (!name) continue; 
+                    
+                    hasItem = true;
+                    var label = document.createElement('label');
+                    label.className = 'flex items-center gap-1 cursor-pointer font-medium text-gray-700 whitespace-nowrap';
+                    
+                    var radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'location';
+                    radio.value = coord; 
+                    // 라디오 버튼 크기 확대 (w-5, h-5)
+                    radio.className = 'accent-blue-500 w-5 h-5';
+                    
+                    // 기기에 기억된 이름과 일치하면 자동 체크
+                    if (savedName && name === savedName) {
+                        radio.checked = true;
+                        anyChecked = true;
+                    }
+                    
+                    // 라디오 버튼을 다른 지역으로 바꾸면 기기에 새 이름 저장 후 날씨 새로고침
+                    radio.setAttribute('data-name', name);
+                    radio.addEventListener('change', function() {
+                        localStorage.setItem('lastSelectedLocationName', this.getAttribute('data-name'));
+                        fetchWeather();
+                    });
+                    
+                    label.appendChild(radio);
+                    label.appendChild(document.createTextNode(' ' + name));
+                    container.appendChild(label);
+                }
+                
+                if (!hasItem) {
+                    container.innerHTML = '<span class="text-sm text-red-500">시트에 지역 정보가 없습니다.</span>';
+                } else {
+                    // 처음 켰거나 매칭되는 저장 데이터가 없다면 무조건 1번째 항목 강제 체크
+                    if (!anyChecked) {
+                        var firstRadio = container.querySelector('input[name="location"]');
+                        if (firstRadio) firstRadio.checked = true;
+                    }
+                    // 최종 선택된 지역의 날씨 불러오기
+                    fetchWeather();
+                }
+            })
+            .catch(function(error) {
+                var container = document.getElementById('location-radio-container');
+                container.innerHTML = '<span class="text-sm text-red-500">데이터 통신 오류: ' + error.message + '</span>';
+                weatherDisplay.innerText = "지역 연동 실패";
+            });
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        setTimeout(initWeatherApp, 50);
+    } else {
+        document.addEventListener('DOMContentLoaded', initWeatherApp);
+        window.addEventListener('load', initWeatherApp);
+    }
+    setTimeout(initWeatherApp, 1000);
+
+    </script>
+</body>
+</html>

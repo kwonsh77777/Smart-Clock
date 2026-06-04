@@ -1,6 +1,6 @@
 {
   "name": "Smart Clock & Weather",
-  "short_name": "스마트시계",
+  "short_name": "Smart-Clock",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
